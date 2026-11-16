@@ -40,7 +40,7 @@ jobs:
       - name: Build production bundle
         run: npm run build
         env:
-          VITE_BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+          VITE_BASE_PATH: '/'
 
       - name: Upload dist artifact
         uses: actions/upload-pages-artifact@v5

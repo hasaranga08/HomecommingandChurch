@@ -5,12 +5,16 @@ import { getAssetUrl } from '../utils/assets';
 
 interface EnvelopeVideoExperienceProps {
   onComplete: () => void;
+  onOpenStart?: () => void;
   isOpen: boolean;
+  resetSignal?: number;
 }
 
 export const EnvelopeVideoExperience: React.FC<EnvelopeVideoExperienceProps> = ({
   onComplete,
+  onOpenStart,
   isOpen,
+  resetSignal = 0,
 }) => {
   // State machine:
   // 'initial': video paused on first frame, text overlay "Chamod & Roshini" + "Tap to open" visible
@@ -55,7 +59,7 @@ export const EnvelopeVideoExperience: React.FC<EnvelopeVideoExperienceProps> = (
     }
   }, []);
 
-  // Sync state and reset video whenever isOpen changes (including user tapping "Replay Envelope")
+  // Sync state and reset video whenever isOpen or resetSignal changes (including Back or "Replay Envelope")
   useEffect(() => {
     if (transitionTimeoutRef.current) {
       clearTimeout(transitionTimeoutRef.current);
@@ -70,7 +74,7 @@ export const EnvelopeVideoExperience: React.FC<EnvelopeVideoExperienceProps> = (
     } else {
       setStage('completed');
     }
-  }, [isOpen, resetVideo]);
+  }, [isOpen, resetSignal, resetVideo]);
 
   // Clean up any pending transition timer on unmount
   useEffect(() => {
@@ -119,6 +123,8 @@ export const EnvelopeVideoExperience: React.FC<EnvelopeVideoExperienceProps> = (
     } catch (audioErr) {
       console.warn('Background audio start skipped:', audioErr);
     }
+
+    onOpenStart?.();
 
     const video = videoRef.current;
     if (!video) return;

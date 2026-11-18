@@ -11,11 +11,14 @@ import { ThankYouSection } from './components/ThankYouSection';
 import { AudioPlayer } from './components/AudioPlayer';
 import { FloatingControls } from './components/FloatingControls';
 import { getAssetUrl } from './utils/assets';
+import { audioManager } from './utils/audioManager';
 
 gsap.registerPlugin(ScrollTrigger);
 
 export default function App() {
   const [isEnvelopeOpen, setIsEnvelopeOpen] = useState(false);
+  const [envelopeResetKey, setEnvelopeResetKey] = useState(0);
+  const isActiveSessionRef = useRef(false);
   const stationeryContainerRef = useRef<HTMLDivElement>(null);
   const bgImgRef = useRef<HTMLImageElement>(null);
 
@@ -100,12 +103,50 @@ export default function App() {
     }, 60);
   };
 
-  const handleReplayEnvelope = () => {
+  const returnToUnopenedEnvelope = useCallback(() => {
+    isActiveSessionRef.current = false;
+    audioManager.stop();
     setIsEnvelopeOpen(false);
+    setEnvelopeResetKey((k) => k + 1);
     if (stationeryContainerRef.current) {
       stationeryContainerRef.current.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
     }
-  };
+  }, []);
+
+  const handleOpenStart = useCallback(() => {
+    isActiveSessionRef.current = true;
+    try {
+      if (!window.history.state?.invitationOpen) {
+        window.history.pushState({ invitationOpen: true }, '');
+      }
+    } catch {
+      // ignore history errors in restricted frames
+    }
+  }, []);
+
+  const handleReplayEnvelope = useCallback(() => {
+    returnToUnopenedEnvelope();
+    try {
+      if (window.history.state?.invitationOpen) {
+        window.history.back();
+      }
+    } catch {
+      // ignore
+    }
+  }, [returnToUnopenedEnvelope]);
+
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      if (!event.state?.invitationOpen && isActiveSessionRef.current) {
+        returnToUnopenedEnvelope();
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
+  }, [returnToUnopenedEnvelope]);
 
   // Scroll animations: elements smoothly fade-and-rise as user scrolls down inside container
   useEffect(() => {
@@ -156,6 +197,8 @@ export default function App() {
       {/* ============================================================ */}
       <EnvelopeVideoExperience
         isOpen={isEnvelopeOpen}
+        resetSignal={envelopeResetKey}
+        onOpenStart={handleOpenStart}
         onComplete={handleEnvelopeComplete}
       />
 

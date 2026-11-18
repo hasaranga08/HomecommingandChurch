@@ -1,27 +1,28 @@
 /**
  * Global Audio Manager for Wedding Background Music
- * Plays the official wedding song: "The Wedding Song (Mathakaida Ada Wage)" - Meena Prasadini
- * - Starts seamlessly upon the guest's first tap on "Tap to open"
+ * - Starts from 00:00 upon the guest's tap on "Tap to open"
  * - Continues playing smoothly across video playback, page transitions, and scrolling
- * - Muting silences the audio without pausing or resetting track position
- * - Unmuting restores audio at the current position
- * - Handled via native HTML5 Audio singleton for optimal mobile (iOS Safari & Android Chrome) performance
+ * - Stops immediately and resets to 00:00 when returning to the unopened envelope (Back or Replay Envelope)
+ * - Preserves mute/unmute preference across stop/reset/restart cycles without auto-unmuting
+ * - Uses a single native HTML5 Audio element to prevent duplicate or overlapping playback
  */
 
 import { getAssetUrl } from './assets';
 
 export const WEDDING_AUDIO_SRC = getAssetUrl(
-  'assets/aistudio/Y2Mate.is_-_The_Wedding_Song___Mathakaida_Ada_Wage___Meena_Prasadini_6608321d.mp3'
+  'assets/aistudio/New_song.mp3_a78f27ce.mpeg'
 );
 
 class AudioManager {
   private audio: HTMLAudioElement | null = null;
   private isStarted = false;
+  private shouldBePlaying = false;
   private isMuted = false;
+  private pendingResetToZero = false;
+  private playbackToken = 0;
   private listeners: Set<() => void> = new Set();
 
   constructor() {
-    // Lazily initialize audio on first browser load if window is available
     if (typeof window !== 'undefined') {
       this.initAudioElement();
     }
@@ -33,10 +34,35 @@ class AudioManager {
       this.audio.loop = true;
       this.audio.preload = 'auto';
       this.audio.muted = this.isMuted;
-      this.audio.volume = this.isMuted ? 0 : 0.85;
+      try {
+        this.audio.volume = this.isMuted ? 0 : 0.85;
+      } catch {
+        // iOS Safari does not allow programmatic volume changes
+      }
 
-      // Event listeners for state changes
+      this.audio.addEventListener('loadedmetadata', () => {
+        if (this.pendingResetToZero && this.audio) {
+          try {
+            this.audio.currentTime = 0;
+          } catch {
+            // ignore
+          }
+          this.pendingResetToZero = false;
+        }
+      });
+
       this.audio.addEventListener('play', () => {
+        if (!this.shouldBePlaying && this.audio) {
+          this.audio.pause();
+          try {
+            if (this.audio.readyState >= 1) {
+              this.audio.currentTime = 0;
+            }
+          } catch {
+            // ignore
+          }
+          return;
+        }
         this.isStarted = true;
         this.notify();
       });
@@ -78,31 +104,59 @@ class AudioManager {
   }
 
   /**
-   * Starts background music from the beginning upon direct user interaction.
-   * If already playing, maintains playback without glitch or restart.
+   * Starts background music from 00:00 upon direct user interaction.
+   * Preserves existing mute preference and prevents duplicate overlapping playback.
    */
   start() {
     const audio = this.initAudioElement();
 
-    // If already playing smoothly, do not interrupt
-    if (this.isStarted && !audio.paused) {
+    // If already actively playing for the current open session, do not interrupt
+    if (this.shouldBePlaying && this.isStarted && !audio.paused) {
       return;
+    }
+
+    const token = ++this.playbackToken;
+    this.shouldBePlaying = true;
+    this.pendingResetToZero = false;
+
+    try {
+      if (audio.readyState >= 1) {
+        audio.currentTime = 0;
+      } else {
+        this.pendingResetToZero = true;
+      }
+    } catch {
+      this.pendingResetToZero = true;
     }
 
     try {
       audio.muted = this.isMuted;
-      audio.volume = this.isMuted ? 0 : 0.85;
+      try {
+        audio.volume = this.isMuted ? 0 : 0.85;
+      } catch {
+        // iOS Safari does not allow programmatic volume changes
+      }
 
       const playPromise = audio.play();
       if (playPromise !== undefined) {
         playPromise
           .then(() => {
+            if (token !== this.playbackToken || !this.shouldBePlaying) {
+              audio.pause();
+              try {
+                if (audio.readyState >= 1) {
+                  audio.currentTime = 0;
+                }
+              } catch {
+                // ignore
+              }
+              return;
+            }
             this.isStarted = true;
             this.notify();
           })
           .catch((err) => {
             console.warn('Audio playback not allowed or interrupted:', err);
-            // Gracefully handle without throwing so video and UI remain fully functional
           });
       } else {
         this.isStarted = true;
@@ -114,9 +168,8 @@ class AudioManager {
   }
 
   /**
-   * Toggles mute state.
-   * Muting silences the music without stopping or resetting playback position.
-   * Unmuting restores the music from its current playback position.
+   * Toggles mute state while preserving playback position and without auto-starting
+   * when the invitation is still on the unopened envelope screen.
    */
   toggleMute() {
     this.isMuted = !this.isMuted;
@@ -125,14 +178,32 @@ class AudioManager {
       this.audio.muted = this.isMuted;
       try {
         this.audio.volume = this.isMuted ? 0 : 0.85;
-      } catch (e) {
-        // iOS Safari does not allow programmatically modifying volume property, uses muted instead
+      } catch {
+        // iOS Safari does not allow programmatic volume changes
       }
 
-      // If user tapped unmute before start was triggered, initiate playback
-      if (!this.isMuted && !this.isStarted) {
-        this.start();
-        return;
+      // If invitation is already open and audio was paused/blocked while muted, resume cleanly
+      if (!this.isMuted && this.shouldBePlaying && this.audio.paused) {
+        const token = ++this.playbackToken;
+        try {
+          const playPromise = this.audio.play();
+          if (playPromise !== undefined) {
+            playPromise
+              .then(() => {
+                if (token !== this.playbackToken || !this.shouldBePlaying) {
+                  this.audio?.pause();
+                  return;
+                }
+                this.isStarted = true;
+                this.notify();
+              })
+              .catch((err) => {
+                console.warn('Audio unmute resume skipped:', err);
+              });
+          }
+        } catch (err) {
+          console.warn('Audio unmute error:', err);
+        }
       }
     }
 
@@ -143,6 +214,8 @@ class AudioManager {
    * Pauses audio if explicitly needed
    */
   pause() {
+    this.shouldBePlaying = false;
+    this.playbackToken++;
     if (this.audio && !this.audio.paused) {
       this.audio.pause();
     }
@@ -150,18 +223,28 @@ class AudioManager {
   }
 
   /**
-   * Stops audio and resets to start
+   * Immediately pauses audio and resets playback position to 00:00.
+   * Preserves the guest's current mute preference.
    */
   stop() {
+    this.shouldBePlaying = false;
+    this.isStarted = false;
+    this.playbackToken++;
+
     if (this.audio) {
       this.audio.pause();
       try {
-        this.audio.currentTime = 0;
-      } catch (e) {
-        // ignore
+        if (this.audio.readyState >= 1) {
+          this.audio.currentTime = 0;
+          this.pendingResetToZero = false;
+        } else {
+          this.pendingResetToZero = true;
+        }
+      } catch {
+        this.pendingResetToZero = true;
       }
     }
-    this.isStarted = false;
+
     this.notify();
   }
 }

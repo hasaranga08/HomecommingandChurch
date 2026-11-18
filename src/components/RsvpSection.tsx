@@ -76,21 +76,24 @@ export const RsvpSection: React.FC = () => {
     wishes: string
   ) => {
     const finalGuests = attendance === 'Yes, happily accepting' ? (guestsCount || '1') : '0';
-    const finalMessage = wishes.trim() ? wishes.trim() : 'None';
+    const trimmedMessage = wishes.trim();
 
-    return [
-      'Homecoming RSVP – Hasaranga & Roshini',
+    const lines = [
+      'Homecomming and Church RSVP',
       '',
-      `Guest Name: ${name.trim()}`,
+      'Hello! I would like to confirm my attendance.',
       '',
-      `Attendance: ${attendance}`,
-      '',
-      `Number of Guests: ${finalGuests}`,
-      '',
-      `Message: ${finalMessage}`,
-      '',
-      'Wedding Date: 02nd of January 2027',
-    ].join('\n');
+      `Name: ${name.trim()}`,
+      `Number of guests: ${finalGuests}`,
+      `Attendance confirmation: ${attendance}`,
+    ];
+
+    if (trimmedMessage) {
+      lines.push(`Message: ${trimmedMessage}`);
+    }
+
+    lines.push('', 'Thank you!');
+    return lines.join('\n');
   };
 
   const handleSubmit = (e: React.FormEvent) => {
